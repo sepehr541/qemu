@@ -431,7 +431,7 @@ build_iort(GArray *table_data, BIOSLinker *linker, VirtMachineState *vms)
  * Rev: 1.07
  */
 static void
-spcr_setup(GArray *table_data, BIOSLinker *linker, VirtMachineState *vms)
+spcr_setup(GArray *table_data, BIOSLinker *linker, VirtMachineState *vms, int uart)
 {
     AcpiSpcrData serial = {
         .interface_type = 3,       /* ARM PL011 UART */
@@ -439,10 +439,10 @@ spcr_setup(GArray *table_data, BIOSLinker *linker, VirtMachineState *vms)
         .base_addr.width = 32,
         .base_addr.offset = 0,
         .base_addr.size = 3,
-        .base_addr.addr = vms->memmap[VIRT_UART].base,
+        .base_addr.addr = vms->memmap[uart].base,
         .interrupt_type = (1 << 3),/* Bit[3] ARMH GIC interrupt*/
         .pc_interrupt = 0,         /* IRQ */
-        .interrupt = (vms->irqmap[VIRT_UART] + ARM_SPI_BASE),
+        .interrupt = (vms->irqmap[uart] + ARM_SPI_BASE),
         .baud_rate = 3,            /* 9600 */
         .parity = 0,               /* No Parity */
         .stop_bits = 1,            /* 1 Stop bit */
@@ -815,6 +815,10 @@ build_dsdt(GArray *table_data, BIOSLinker *linker, VirtMachineState *vms)
     acpi_dsdt_add_cpus(scope, vms);
     acpi_dsdt_add_uart(scope, &memmap[VIRT_UART],
                        (irqmap[VIRT_UART] + ARM_SPI_BASE));
+
+    acpi_dsdt_add_uart(scope, &memmap[VIRT_UART2],
+                       (irqmap[VIRT_UART2] + ARM_SPI_BASE));
+    
     if (vmc->acpi_expose_flash) {
         acpi_dsdt_add_flash(scope, &memmap[VIRT_FLASH]);
     }
@@ -924,7 +928,9 @@ void virt_acpi_build(VirtMachineState *vms, AcpiBuildTables *tables)
     }
 
     acpi_add_table(table_offsets, tables_blob);
-    spcr_setup(tables_blob, tables->linker, vms);
+    spcr_setup(tables_blob, tables->linker, vms, VIRT_UART);
+    spcr_setup(tables_blob, tables->linker, vms, VIRT_UART2);
+    
 
     acpi_add_table(table_offsets, tables_blob);
     build_dbg2(tables_blob, tables->linker, vms);

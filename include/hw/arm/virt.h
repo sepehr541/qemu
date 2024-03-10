@@ -77,6 +77,7 @@ enum {
     VIRT_NVDIMM_ACPI,
     VIRT_PVTIME,
     VIRT_LOWMEMMAP_LAST,
+    VIRT_UART2
 };
 
 /* indices of IO regions located after the RAM */
