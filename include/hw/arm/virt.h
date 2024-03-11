@@ -60,6 +60,7 @@ enum {
     VIRT_GIC_REDIST,
     VIRT_SMMU,
     VIRT_UART,
+    VIRT_UART2,
     VIRT_MMIO,
     VIRT_RTC,
     VIRT_FW_CFG,
@@ -76,8 +77,7 @@ enum {
     VIRT_ACPI_GED,
     VIRT_NVDIMM_ACPI,
     VIRT_PVTIME,
-    VIRT_LOWMEMMAP_LAST,
-    VIRT_UART2
+    VIRT_LOWMEMMAP_LAST
 };
 
 /* indices of IO regions located after the RAM */
