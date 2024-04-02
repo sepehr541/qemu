@@ -82,7 +82,9 @@
 #include "hw/acpi/generic_event_device.h"
 #include "hw/virtio/virtio-md-pci.h"
 #include "hw/virtio/virtio-iommu.h"
-#include "hw/char/pl011.h"
+/* #include "hw/char/pl011.h" */
+#include "hw/char/mypl011.h"
+
 #include "qemu/guest-random.h"
 
 #define DEFINE_VIRT_MACHINE_LATEST(major, minor, latest) \
@@ -868,7 +870,7 @@ static void create_uart(const VirtMachineState *vms, int uart,
     int irq = vms->irqmap[uart];
     const char compat[] = "arm,pl011\0arm,primecell";
     const char clocknames[] = "uartclk\0apb_pclk";
-    DeviceState *dev = qdev_new(TYPE_PL011);
+    DeviceState *dev = qdev_new(TYPE_MYPL011);
     SysBusDevice *s = SYS_BUS_DEVICE(dev);
     MachineState *ms = MACHINE(vms);
 

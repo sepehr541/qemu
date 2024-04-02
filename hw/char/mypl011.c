@@ -24,17 +24,38 @@ static unsigned char UARTPeriphID[] = {0x11, 0x10, 0x14, 0x00};
 /* PrimeCell Identification Registers */ 
 static unsigned char UARTCellID[] = {0x0d, 0xf0, 0x05, 0xb1};
 
+static const char *pl011_regname(hwaddr offset)
+{
+    /* trace_mypl011_call(__func__); */
+    static const char *const rname[] = {
+        [0] = "DR", [1] = "RSR", [6] = "FR", [8] = "ILPR", [9] = "IBRD",
+        [10] = "FBRD", [11] = "LCRH", [12] = "CR", [13] = "IFLS", [14] = "IMSC",
+        [15] = "RIS", [16] = "MIS", [17] = "ICR", [18] = "DMACR",
+    };
+    unsigned idx = offset >> 2;
+
+    if (idx < ARRAY_SIZE(rname) && rname[idx]) {
+        return rname[idx];
+    }
+    if (idx >= 0x3f8 && idx <= 0x400) {
+        return "ID";
+    }
+    return "UNKN";
+}
+
 /*********************
  *  Flags            *
  *********************/
 
 static inline bool pl011_loopback_enabled(MyPL011State *pl011)
 {
+    trace_mypl011_call(__func__);
     return !!(pl011->UARTCR & UARTCR_LBE);
 }
 
 static inline bool pl011_is_fifo_enabled(MyPL011State *pl011)
 {
+    trace_mypl011_call(__func__);
     return (pl011->UARTLCR_H & UARTLCR_H_FEN) != 0;
 }
 
@@ -42,6 +63,7 @@ static inline bool pl011_is_fifo_enabled(MyPL011State *pl011)
 __attribute__((unused))
 static unsigned int pl011_get_baudrate(const MyPL011State *pl011)
 {
+    trace_mypl011_call(__func__);
     uint64_t clk;
 
     if (pl011->UARTIBRD == 0) {
@@ -55,10 +77,11 @@ static unsigned int pl011_get_baudrate(const MyPL011State *pl011)
 __attribute__((unused))
 static void pl011_trace_baudrate_change(const MyPL011State *pl011)
 {
-    trace_pl011_baudrate_change(pl011_get_baudrate(pl011),
-                                clock_get_hz(pl011->clk),
-                                pl011->UARTIBRD,
-                                pl011->UARTFBRD);
+    trace_mypl011_call(__func__);
+    trace_mypl011_baudrate_change(pl011_get_baudrate(pl011),
+                                  clock_get_hz(pl011->clk),
+                                  pl011->UARTIBRD,
+                                  pl011->UARTFBRD);
 }
 
 /*********************
@@ -69,11 +92,14 @@ static void pl011_trace_baudrate_change(const MyPL011State *pl011)
 /*
   asserted if *any* of the individual interrupts are asserted and enabled.
 */
-static inline void assert_INTR(MyPL011State *pl011) {  
+static inline void assert_INTR(MyPL011State *pl011) {
+    trace_mypl011_call(__func__);
     qemu_set_irq(pl011->UARTINTR, pl011->UARTMIS != 0);
 }
 
 static void set_interrupt(MyPL011State *pl011, uint32_t irq_mask) {
+    trace_mypl011_call(__func__);
+    
     /* set RIS */
     pl011->UARTRIS &= irq_mask;
     /* check mask */
@@ -84,6 +110,8 @@ static void set_interrupt(MyPL011State *pl011, uint32_t irq_mask) {
 }
 
 static void clear_interrupt(MyPL011State *pl011, uint32_t irq_mask) {
+    trace_mypl011_call(__func__);
+    
     /* clear RIS */
     pl011->UARTRIS &= ~irq_mask;
     /* check mask */
@@ -94,6 +122,8 @@ static void clear_interrupt(MyPL011State *pl011, uint32_t irq_mask) {
 }
 
 static void trigger_interrupt(qemu_irq irq_line, int level) {
+    trace_mypl011_call(__func__);
+    
     qemu_set_irq(irq_line, level);
 }
 
@@ -105,6 +135,8 @@ static void trigger_interrupt(qemu_irq irq_line, int level) {
   thereby filling the location, the receive interrupt is asserted HIGH. 
 */
 static void set_RXINTR(MyPL011State *pl011) {
+    trace_mypl011_call(__func__);
+    
     set_interrupt(pl011, RXINTR);
     trigger_interrupt(pl011->UARTRXINTR, true);
 }
@@ -115,6 +147,8 @@ static void set_RXINTR(MyPL011State *pl011) {
   - The receive interrupt is cleared by performing a single read of the receive FIFO, or by clearing the interrupt.
 */
 static void clear_RXINTR(MyPL011State *pl011) {
+    trace_mypl011_call(__func__);
+    
     clear_interrupt(pl011, RXINTR);
     trigger_interrupt(pl011->UARTRXINTR, false);
 }
@@ -144,7 +178,10 @@ static void clear_RXINTR(MyPL011State *pl011) {
   the single location of the transmit FIFO and it becomes empty.
 */
 static void set_TXINTR(MyPL011State *pl011) {
+    trace_mypl011_call(__func__);
+    
     set_interrupt(pl011, TXINTR);
+    trigger_interrupt(pl011->UARTTXINTR, true);
 }
 
 __attribute__((unused))
@@ -192,29 +229,46 @@ static void clear_MSINTR(MyPL011State *pl011, uint32_t irq_mask) {
     }
 }
 
+static void pl011_update_interrupts(MyPL011State *pl011) {
+    trace_mypl011_call(__func__);
+    
+    pl011->UARTMIS = pl011->UARTRIS & pl011->UARTIMSC;
+    trace_mypl011_irq_state(pl011->UARTRIS, pl011->UARTMIS, pl011->UARTIMSC);
+    
+    trigger_interrupt(pl011->UARTINTR,    pl011->UARTMIS != 0);
+    trigger_interrupt(pl011->UARTRXINTR, (pl011->UARTMIS & RXINTR)!= 0);
+    trigger_interrupt(pl011->UARTTXINTR, (pl011->UARTMIS & TXINTR) != 0);
+    trigger_interrupt(pl011->UARTRTINTR, (pl011->UARTMIS & RTINTR) != 0);
+    trigger_interrupt(pl011->UARTEINTR,  (pl011->UARTMIS & EINTR_MASK) != 0);
+    trigger_interrupt(pl011->UARTMSINTR, (pl011->UARTMIS & MSINTR) != 0);
+}
 
 
 
 /*********************
  *  FIFO             *
  *********************/
-static inline unsigned pl011_get_fifo_depth(MyPL011State *pl011)
-{
+static inline unsigned pl011_get_fifo_depth(MyPL011State *pl011) {
+    trace_mypl011_call(__func__);
+    
     /* Note: FIFO depth is expected to be power-of-2 */
     return pl011_is_fifo_enabled(pl011) ? MYPL011_FIFO_DEPTH : 1;
 }
 
-static inline void pl011_reset_fifo(MyPL011State *pl011)
-{
+static inline void pl011_reset_fifo(MyPL011State *pl011) {
+    trace_mypl011_call(__func__);
+    
     pl011->read_count = 0;
     pl011->read_pos = 0;
 
     /* Reset FIFO flags */
     pl011->UARTFR &= ~(UARTFR_RXFF |UARTFR_TXFF);
-    pl011->UARTFR |= UARTFR_RXFE | UARTFR_TXFE;
+    pl011->UARTFR |= (UARTFR_RXFE | UARTFR_TXFE);
 }
 
 static void threshold_fraction(uint32_t status, uint32_t *numer, uint32_t *denom) {
+    trace_mypl011_call(__func__);
+    
     switch(status) {
     case UARTIFLS_1_8:
         *denom = 8;
@@ -240,6 +294,8 @@ static void threshold_fraction(uint32_t status, uint32_t *numer, uint32_t *denom
 }
 
 static bool mypl011_RX_FIFO_reached_threshold(MyPL011State *pl011) {
+    trace_mypl011_call(__func__);
+    
     uint32_t numer = 1, denom = 1;
     uint32_t RXIFLSEL = (pl011->UARTIFLS & UARTIFLS_RXIFLSEL_MASK) >> UARTIFLS_RXIFLSEL_SHIFT;
     threshold_fraction(RXIFLSEL, &numer, &denom);
@@ -251,26 +307,32 @@ static bool mypl011_RX_FIFO_reached_threshold(MyPL011State *pl011) {
  * @details Asserts that FIFO is not full
  * @param[in,out] pl011 DeviceState
  */
-static void mypl011_RX_FIFO_push(MyPL011State *pl011, uint32_t val) {
+static void mypl011_RX_FIFO_push(MyPL011State *pl011, uint32_t value) {
+    trace_mypl011_call(__func__);
+    
     /* TODO: FIX to have the overrun bit set */
     assert(pl011->read_count < MYPL011_FIFO_DEPTH);
+    trace_mypl011_put_fifo(value, pl011->read_count);
+    
 
     /* push value onto fifo */
     uint32_t pipe_depth = pl011_get_fifo_depth(pl011);
     int slot = (pl011->read_pos + pl011->read_count) & (pipe_depth - 1);
    
-    pl011->read_fifo[slot] = val;
+    pl011->read_fifo[slot] = value;
     pl011->read_count++;
 
     /* Receive FIFO is not empty */
     pl011->UARTFR &= ~UARTFR_RXFE;
+    
 
     /* Check if FIFO is full  */
     if (pl011->read_count == MYPL011_FIFO_DEPTH) {
         /* set Receive FIFO full */
+        trace_mypl011_put_fifo_full();
         pl011->UARTFR |= UARTFR_RXFF;
     }
-
+    
     if (mypl011_RX_FIFO_reached_threshold(pl011)) {
         set_RXINTR(pl011);
     }
@@ -283,14 +345,20 @@ static void mypl011_RX_FIFO_push(MyPL011State *pl011, uint32_t val) {
  * @return Description
  */
 static uint32_t mypl011_RX_FIFO_pop(MyPL011State *pl011) {
+    trace_mypl011_call(__func__);
+    
     /* TODO: FIX to have the overrun bit set */
     assert(pl011->read_count < MYPL011_FIFO_DEPTH);
-
+    trace_mypl011_read_fifo(pl011->read_count);
+    
+    uint32_t val = 0;
     /* pop value off FIFO */
-    uint32_t val = pl011->read_fifo[pl011->read_pos];
-    uint32_t pipe_depth = pl011_get_fifo_depth(pl011);
-    pl011->read_pos = (pl011->read_pos + 1) % pipe_depth;
-    pl011->read_count--;
+    if (pl011->read_count > 0) {
+        val = pl011->read_fifo[pl011->read_pos];
+        uint32_t pipe_depth = pl011_get_fifo_depth(pl011);
+        pl011->read_count--;
+        pl011->read_pos = (pl011->read_pos + 1) % pipe_depth;
+    }
     
     /* Receive FIFO is not full */
     pl011->UARTFR &= ~UARTFR_RXFF;
@@ -301,6 +369,7 @@ static uint32_t mypl011_RX_FIFO_pop(MyPL011State *pl011) {
         pl011->UARTFR |= UARTFR_RXFE;
     }
 
+    
     /* clear RXINTR if less than threshold */
     if (!mypl011_RX_FIFO_reached_threshold(pl011)) {
         clear_RXINTR(pl011);
@@ -313,29 +382,21 @@ static uint32_t mypl011_RX_FIFO_pop(MyPL011State *pl011) {
 }
 
 
-/* static bool mypl011_TX_FIFO_reached_threshold(MyPL011State *pl011) { */
-/*     uint32_t numer = 1, denom = 1; */
-/*     uint32_t TXIFLSEL = (pl011->UARTIFLS & UARTIFLS_TXIFLSEL); */
-/*     threshold_fraction(TXIFLSEL, &numer, &denom); */
-/*     return pl011->read_count >= (MYPL011_FIFO_DEPTH / denom) * numer; */
-/* } */
-
-
-
 /**
  * @brief Can_receive predicate
  * @details 
  * @param[in,out] opaque Description
  * @return number of bytes the device can receive
  */
-static int pl011_can_receive(void *opaque)
-{
+static int pl011_can_receive(void *opaque) {
+    trace_mypl011_call(__func__);
+    
     MyPL011State *pl011 = (MyPL011State *)opaque;
     int r;
 
     /// TODO: fix to return the number of bytes it can read
     r = pl011->read_count < pl011_get_fifo_depth(pl011);
-    trace_pl011_can_receive(pl011->UARTLCR_H, pl011->read_count, r);
+    trace_mypl011_can_receive(pl011->UARTLCR_H, pl011->read_count, r);
     return r;
 }
 
@@ -346,8 +407,9 @@ static int pl011_can_receive(void *opaque)
  * @param[in] buf Pointer to buffer to ?
  * @param[in] size Description
  */
-static void pl011_receive(void *opaque, const uint8_t *buf, int size)
-{
+static void pl011_receive(void *opaque, const uint8_t *buf, int size) {
+    trace_mypl011_call(__func__);
+    
     /*
      * In loopback mode, the RX input signal is internally disconnected
      * from the entire receiving logics; thus, all inputs are ignored,
@@ -366,14 +428,58 @@ static void pl011_receive(void *opaque, const uint8_t *buf, int size)
  * @param[in,out] opaque Description
  * @param[in] event Description
  */
-static void pl011_event(void *opaque, QEMUChrEvent event)
-{
+static void pl011_event(void *opaque, QEMUChrEvent event) {
+    trace_mypl011_call(__func__);
+    
     MyPL011State *pl011 = (MyPL011State *)opaque;
     /// TODO: handle serial break 
     if (event == CHR_EVENT_BREAK && !pl011_loopback_enabled(pl011)) {
         mypl011_RX_FIFO_push(pl011, UARTDR_BE);
     }
 }
+
+
+/*********************
+ *  Loopback         *
+ *********************/
+static void pl011_loopback_tx(MyPL011State *pl011, uint32_t value) {
+
+    trace_mypl011_call(__func__);
+    
+    if (!pl011_loopback_enabled(pl011)) {
+        return;
+    }
+
+    /*
+     * Caveat:
+     *
+     * In real hardware, TX loopback happens at the serial-bit level
+     * and then reassembled by the RX logics back into bytes and placed
+     * into the RX fifo. That is, loopback happens after TX fifo.
+     *
+     * Because the real hardware TX fifo is time-drained at the frame
+     * rate governed by the configured serial format, some loopback
+     * bytes in TX fifo may still be able to get into the RX fifo
+     * that could be full at times while being drained at software
+     * pace.
+     *
+     * In such scenario, the RX draining pace is the major factor
+     * deciding which loopback bytes get into the RX fifo, unless
+     * hardware flow-control is enabled.
+     *
+     * For simplicity, the above described is not emulated.
+     */
+    mypl011_RX_FIFO_push(pl011, value);
+}
+
+static void pl011_loopback_break(MyPL011State *pl011, int brk_enable) {
+    trace_mypl011_call(__func__);
+    
+    if (brk_enable) {
+        pl011_loopback_tx(pl011, UARTDR_BE);
+    }
+}
+
 
 
 
@@ -384,72 +490,134 @@ static void pl011_event(void *opaque, QEMUChrEvent event)
 typedef uint64_t (*read_reg)(MyPL011State*);
 
 static uint64_t read_UARTDR(MyPL011State *pl011) {
+    trace_mypl011_call(__func__);
+    
     uint32_t value = mypl011_RX_FIFO_pop(pl011);
+    pl011_update_interrupts(pl011);
     qemu_chr_fe_accept_input(&pl011->chr);
     return value;
 }
 static uint64_t read_UARTRSR_ECR(MyPL011State *pl011) {
+    trace_mypl011_call(__func__);
+    
     return pl011->UARTRSR_ECR;
 }
 
 static uint64_t read_UARTFR(MyPL011State *pl011) {
+    trace_mypl011_call(__func__);
+    
     return pl011->UARTFR;
 }
 
 static uint64_t read_UARTILPR(MyPL011State *pl011) {
+    trace_mypl011_call(__func__);
+    
     return pl011->UARTILPR;
 }
 
 static uint64_t read_UARTIBRD(MyPL011State *pl011) {
+    trace_mypl011_call(__func__);
+    
     return pl011->UARTIBRD;
 }
 
 static uint64_t read_UARTFBRD(MyPL011State *pl011) {
+    trace_mypl011_call(__func__);
+    
     return pl011->UARTFBRD;
 }
 
 static uint64_t read_UARTLCR_H(MyPL011State *pl011) {
+    trace_mypl011_call(__func__);
+    
     return pl011->UARTLCR_H;
 }
 
 static uint64_t read_UARTCR(MyPL011State *pl011) {
+    trace_mypl011_call(__func__);
+    
     return pl011->UARTCR;
 }
 
 static uint64_t read_UARTIFLS(MyPL011State *pl011) {
+    trace_mypl011_call(__func__);
+    
     return pl011->UARTIFLS;
 }
 
 static uint64_t read_UARTIMSC(MyPL011State *pl011) {
+    trace_mypl011_call(__func__);
+    
     return pl011->UARTIMSC;
 }
 
 static uint64_t read_UARTRIS(MyPL011State *pl011) {
+    trace_mypl011_call(__func__);
+    
     return pl011->UARTRIS;
 }
 
 static uint64_t read_UARTMIS(MyPL011State *pl011) {
+    trace_mypl011_call(__func__);
+    
     return pl011->UARTMIS;
 }
 
 static uint64_t read_UARTICR(MyPL011State *pl011) {
+    trace_mypl011_call(__func__);
+    
     assert(0);
     return 0;
 }
 
 static uint64_t read_UARTDMACR(MyPL011State *pl011) {
+    trace_mypl011_call(__func__);
+    
     return pl011->UARTDMACR;
 }
 
-static uint64_t read_UARTPeriphID0(MyPL011State *pl011) { return UARTPeriphID[0]; }
-static uint64_t read_UARTPeriphID1(MyPL011State *pl011) { return UARTPeriphID[1]; }
-static uint64_t read_UARTPeriphID2(MyPL011State *pl011) { return UARTPeriphID[2]; }
-static uint64_t read_UARTPeriphID3(MyPL011State *pl011) { return UARTPeriphID[3]; }
+static uint64_t read_UARTPeriphID0(MyPL011State *pl011) {
+    trace_mypl011_call(__func__);
+    return UARTPeriphID[0];
+}
+static uint64_t read_UARTPeriphID1(MyPL011State *pl011) {
+    trace_mypl011_call(__func__);
+    
+    return UARTPeriphID[1];
+}
+static uint64_t read_UARTPeriphID2(MyPL011State *pl011) {
+    trace_mypl011_call(__func__);
 
-static uint64_t read_UARTCellID0(MyPL011State *pl011) { return UARTCellID[0]; }
-static uint64_t read_UARTCellID1(MyPL011State *pl011) { return UARTCellID[1]; }
-static uint64_t read_UARTCellID2(MyPL011State *pl011) { return UARTCellID[2]; }
-static uint64_t read_UARTCellID3(MyPL011State *pl011) { return UARTCellID[3]; }
+    return UARTPeriphID[2];
+}
+static uint64_t read_UARTPeriphID3(MyPL011State *pl011) {
+    trace_mypl011_call(__func__);
+
+    return UARTPeriphID[3];
+}
+
+static uint64_t read_UARTCellID0(MyPL011State *pl011) {
+
+    return UARTCellID[0];
+}
+
+static uint64_t read_UARTCellID1(MyPL011State *pl011) {
+    trace_mypl011_call(__func__);
+
+    return UARTCellID[1];
+}
+
+static uint64_t read_UARTCellID2(MyPL011State *pl011) {
+    trace_mypl011_call(__func__);
+
+    return UARTCellID[2];
+}
+
+static uint64_t read_UARTCellID3(MyPL011State *pl011) {
+    trace_mypl011_call(__func__);
+
+    return UARTCellID[3];
+}
 
 
 read_reg read_funcs[] = {
@@ -483,14 +651,17 @@ read_reg read_funcs[] = {
 typedef void (*write_reg)(MyPL011State*, uint64_t value);
 
 static void write_UARTDR(MyPL011State *pl011, uint64_t value) {
+    trace_mypl011_call(__func__);
+    
     /* ??? Check if transmitter is enabled.  */
     unsigned char ch = value;
     /* XXX this blocks entire thread. Rewrite to use
      * qemu_chr_fe_write and background I/O callbacks */
     qemu_chr_fe_write_all(&pl011->chr, &ch, 1);
-    /* pl011_loopback_tx(s, ch); */
+    pl011_loopback_tx(pl011, ch);
     /* s->int_level |= INT_TX; */
     set_TXINTR(pl011);
+    pl011_update_interrupts(pl011);
     /* ?? other INTRs ?? */
 }
 
@@ -498,26 +669,40 @@ static void write_UARTDR(MyPL011State *pl011, uint64_t value) {
 
 static void write_UARTRSR_ECR(MyPL011State *pl011, uint64_t _) {
     /* A write to the UARTECR Register clears the framing, parity, break, and overrun errors. */
+    trace_mypl011_call(__func__);
+    
     pl011->UARTRSR_ECR = 0;
 }
 
 static void write_UARTFR(MyPL011State *pl011, uint64_t value) {
     /* No-op */
+    trace_mypl011_call(__func__);
+    
 }
 
 static void write_UARTILPR(MyPL011State *pl011, uint64_t value) {
+    trace_mypl011_call(__func__);
+    
     pl011->UARTILPR = value;
 }
 
 static void write_UARTIBRD(MyPL011State *pl011, uint64_t value) {
+    trace_mypl011_call(__func__);
+    
     pl011->UARTIBRD = value;
+    pl011_trace_baudrate_change(pl011);
 }
 
 static void write_UARTFBRD(MyPL011State *pl011, uint64_t value) {
+    trace_mypl011_call(__func__);
+    
     pl011->UARTFBRD = value;
+    pl011_trace_baudrate_change(pl011);
 }
 
 static void write_UARTLCR_H(MyPL011State *pl011, uint64_t value) {
+    trace_mypl011_call(__func__);
+    
     /* Reset the FIFO state on FIFO enable or disable */
     if ((pl011->UARTLCR_H ^ value) & UARTLCR_H_FEN) {
         pl011_reset_fifo(pl011);
@@ -527,40 +712,56 @@ static void write_UARTLCR_H(MyPL011State *pl011, uint64_t value) {
         int break_enable = value & UARTLCR_H_BRK;
         qemu_chr_fe_ioctl(&pl011->chr, CHR_IOCTL_SERIAL_SET_BREAK,
                           &break_enable);
-        /* pl011_loopback_break(s, break_enable); */
+        pl011_loopback_break(pl011, break_enable);
     }
     pl011->UARTLCR_H = value;
 }
 
 static void write_UARTCR(MyPL011State *pl011, uint64_t value) {
+    trace_mypl011_call(__func__);
+    
     /* TODO: ??? Need to implement the enable bit.  */
     pl011->UARTCR = value;
     /* pl011_loopback_mdmctrl(s); */
 }
 
 static void write_UARTIFLS(MyPL011State *pl011, uint64_t value) {
+    trace_mypl011_call(__func__);
+    
     pl011->UARTIFLS = value;
 }
 
 static void write_UARTIMSC(MyPL011State *pl011, uint64_t value) {
+    trace_mypl011_call(__func__);
+    
     pl011->UARTIMSC = value;
+    pl011_update_interrupts(pl011);
 }
 
 static void write_UARTRIS(MyPL011State *pl011, uint64_t value) {
+    trace_mypl011_call(__func__);
+    
     /* Read-only */
 }
 
 static void write_UARTMIS(MyPL011State *pl011, uint64_t value) {
+    trace_mypl011_call(__func__);
+    
     /* Read-only */
 }
 
 static void write_UARTICR(MyPL011State *pl011, uint64_t value) {
+    trace_mypl011_call(__func__);
+    
     pl011->UARTRIS &= ~value;
     pl011->UARTMIS &= ~value;
     /* TODO: retrigger interrupts */
+    pl011_update_interrupts(pl011);
 }
 
 static void write_UARTDMACR(MyPL011State *pl011, uint64_t value) {
+    trace_mypl011_call(__func__);
+    
     pl011->UARTDMACR = value;
 }
 
@@ -607,10 +808,12 @@ write_reg write_funcs[] = {
 static uint64_t mypl011_read(void* opaque, hwaddr offset, unsigned size) {
     MyPL011State *pl011 = (MyPL011State *)opaque;
     uint64_t retval = read_funcs[offset](pl011);
+    trace_mypl011_read(offset, retval, pl011_regname(offset));
     return retval;
 }
 
 static void mypl011_write(void* opaque, hwaddr offset, uint64_t value, unsigned size) {
+    trace_mypl011_write(offset, value, pl011_regname(offset));
     MyPL011State *pl011 = (MyPL011State *)opaque;
     write_funcs[offset](pl011, value);
 }
@@ -640,6 +843,8 @@ static const MemoryRegionOps mypl011_mem_ops = {
  * @param[out] errp Description
  */
 static void mypl011_realize(DeviceState *dev, Error **errp) {
+    trace_mypl011_call(__func__);
+    
     MyPL011State *pl011 = MYPL011(dev);
 
     qemu_chr_fe_set_handlers(
@@ -650,7 +855,7 @@ static void mypl011_realize(DeviceState *dev, Error **errp) {
         NULL,
         pl011,
         NULL,
-        true);
+        true);   
 }
 
 
@@ -660,6 +865,7 @@ static void mypl011_realize(DeviceState *dev, Error **errp) {
  * @param[in,out] DeviceState of PL011
  */
 static void mypl011_reset(DeviceState *dev) {
+    trace_mypl011_call(__func__);
     MyPL011State *pl011 = MYPL011(dev);
 
     /* Reset Registers */
@@ -687,16 +893,13 @@ static void mypl011_reset(DeviceState *dev) {
     qemu_set_irq(pl011->UARTRTINTR, false);
     qemu_set_irq(pl011->UARTMSINTR, false);
     qemu_set_irq(pl011->UARTEINTR, false);
-
 }
 
-
-
-static void pl011_clock_update(void *opaque, ClockEvent event)
-{
-    /* TODO */
-    /* PL011State *s = PL011(opaque); */
-    /* pl011_trace_baudrate_change(s); */
+static void pl011_clock_update(void *opaque, ClockEvent event) {
+    trace_mypl011_call(__func__);
+    
+    MyPL011State *pl011 = MYPL011(opaque);
+    pl011_trace_baudrate_change(pl011);
 }
 
 /**
@@ -706,6 +909,8 @@ static void pl011_clock_update(void *opaque, ClockEvent event)
  */
 static void mypl011_init(Object *obj) {
 
+    trace_mypl011_init();
+    
     /* Cast to Device */
     MyPL011State *pl011 = MYPL011(obj);
     SysBusDevice *sysbusdev = SYS_BUS_DEVICE(obj);
@@ -726,8 +931,7 @@ static void mypl011_init(Object *obj) {
 
     /* Initialize clock into PL011  */
     pl011->clk = qdev_init_clock_in(DEVICE(obj), "clk", pl011_clock_update, pl011, ClockUpdate);
-
-    /* dev->id = pl011_id_arm; */
+    
 }
 
 /**
@@ -763,6 +967,85 @@ DeviceState* mypl011_create(hwaddr addr, qemu_irq irq, Chardev *chr) {
     return dev;
 }
 
+/*********************
+ * VMState           *
+ *********************/
+
+static bool pl011_clock_needed(void *opaque) {
+    trace_mypl011_call(__func__);
+    
+    MyPL011State *pl011 = MYPL011(opaque);
+
+    return pl011->migrate_clk;
+}
+
+static const VMStateDescription vmstate_pl011_clock = {
+    .name = "pl011/clock",
+    .version_id = 1,
+    .minimum_version_id = 1,
+    .needed = pl011_clock_needed,
+    .fields = (const VMStateField[]) {
+        VMSTATE_CLOCK(clk, MyPL011State),
+        VMSTATE_END_OF_LIST()
+    }
+};
+
+static int pl011_post_load(void *opaque, int version_id) {
+    trace_mypl011_call(__func__);
+    
+    MyPL011State* s = MYPL011(opaque);
+
+    /* Sanity-check input state */
+    if (s->read_pos >= ARRAY_SIZE(s->read_fifo) ||
+        s->read_count > ARRAY_SIZE(s->read_fifo)) {
+        return -1;
+    }
+
+    if (!pl011_is_fifo_enabled(s) && s->read_count > 0 && s->read_pos > 0) {
+        /*
+         * Older versions of PL011 didn't ensure that the single
+         * character in the FIFO in FIFO-disabled mode is in
+         * element 0 of the array; convert to follow the current
+         * code's assumptions.
+         */
+        s->read_fifo[0] = s->read_fifo[s->read_pos];
+        s->read_pos = 0;
+    }
+
+    return 0;
+}
+
+static const VMStateDescription vmstate_mypl011 = {
+    .name = "pl011",
+    .version_id = 2,
+    .minimum_version_id = 2,
+    .post_load = pl011_post_load,
+    .fields = (const VMStateField[]) {
+        VMSTATE_UINT32(UARTRSR_ECR, MyPL011State),
+        VMSTATE_UINT32(UARTFR, MyPL011State),
+        VMSTATE_UINT32(UARTILPR, MyPL011State),
+        VMSTATE_UINT32(UARTIBRD, MyPL011State),
+        VMSTATE_UINT32(UARTFBRD, MyPL011State),
+        VMSTATE_UINT32(UARTLCR_H, MyPL011State),
+        VMSTATE_UINT32(UARTCR, MyPL011State),
+        VMSTATE_UINT32(UARTIFLS, MyPL011State),
+        VMSTATE_UINT32(UARTIMSC, MyPL011State),
+        VMSTATE_UINT32(UARTRIS, MyPL011State),
+        VMSTATE_UINT32(UARTMIS, MyPL011State),
+        VMSTATE_UINT32(UARTICR, MyPL011State),
+        VMSTATE_UINT32(UARTDMACR, MyPL011State),
+        VMSTATE_UINT32_ARRAY(read_fifo, MyPL011State, MYPL011_FIFO_DEPTH),
+        VMSTATE_INT32(read_pos, MyPL011State),
+        VMSTATE_INT32(read_count, MyPL011State),
+        VMSTATE_END_OF_LIST()
+    },
+    .subsections = (const VMStateDescription * const []) {
+        &vmstate_pl011_clock,
+        NULL
+    }
+};
+
+
 
 /**
  * @var mypl011_properties
@@ -781,12 +1064,12 @@ static Property mypl011_properties[] = {
  * @param[out] class_data N/A
  */
 static void mypl011_class_init(ObjectClass *klass, void *class_data) {
+    trace_mypl011_call(__func__);
+    
     DeviceClass *dc = DEVICE_CLASS(klass);
     dc->realize = mypl011_realize;
     dc->reset = mypl011_reset;
-    /* dc->vmsd = &mypl011_vmstate; */
-
-    /* Device Composition and Backlink through setting the properties */
+    dc->vmsd = &vmstate_mypl011;
     device_class_set_props(dc, mypl011_properties);
 }
 
