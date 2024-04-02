@@ -12,6 +12,7 @@
 #include "qemu/log.h"
 #include "qemu/module.h"
 #include "trace.h"
+#include <stdint.h>
 
 #define MyPL011_REG_SIZE 0x1000
 
@@ -430,7 +431,7 @@ static void pl011_receive(void *opaque, const uint8_t *buf, int size) {
  */
 static void pl011_event(void *opaque, QEMUChrEvent event) {
     trace_mypl011_call(__func__);
-    
+    trace_mypl011_event(event);
     MyPL011State *pl011 = (MyPL011State *)opaque;
     /// TODO: handle serial break 
     if (event == CHR_EVENT_BREAK && !pl011_loopback_enabled(pl011)) {
@@ -578,45 +579,46 @@ static uint64_t read_UARTDMACR(MyPL011State *pl011) {
 
 static uint64_t read_UARTPeriphID0(MyPL011State *pl011) {
     trace_mypl011_call(__func__);
-    return UARTPeriphID[0];
+    return (uint64_t)UARTPeriphID[0];
 }
 static uint64_t read_UARTPeriphID1(MyPL011State *pl011) {
     trace_mypl011_call(__func__);
     
-    return UARTPeriphID[1];
+    return (uint64_t)UARTPeriphID[1];
 }
 static uint64_t read_UARTPeriphID2(MyPL011State *pl011) {
     trace_mypl011_call(__func__);
 
-    return UARTPeriphID[2];
+    return (uint64_t)UARTPeriphID[2];
 }
 static uint64_t read_UARTPeriphID3(MyPL011State *pl011) {
     trace_mypl011_call(__func__);
 
-    return UARTPeriphID[3];
+    return (uint64_t)UARTPeriphID[3];
 }
 
 static uint64_t read_UARTCellID0(MyPL011State *pl011) {
-
-    return UARTCellID[0];
+    trace_mypl011_call(__func__);
+    
+    return (uint64_t)UARTCellID[0];
 }
 
 static uint64_t read_UARTCellID1(MyPL011State *pl011) {
     trace_mypl011_call(__func__);
 
-    return UARTCellID[1];
+    return (uint64_t)UARTCellID[1];
 }
 
 static uint64_t read_UARTCellID2(MyPL011State *pl011) {
     trace_mypl011_call(__func__);
 
-    return UARTCellID[2];
+    return (uint64_t)UARTCellID[2];
 }
 
 static uint64_t read_UARTCellID3(MyPL011State *pl011) {
     trace_mypl011_call(__func__);
 
-    return UARTCellID[3];
+    return (uint64_t)UARTCellID[3];
 }
 
 
@@ -807,7 +809,7 @@ write_reg write_funcs[] = {
  ***************************/
 static uint64_t mypl011_read(void* opaque, hwaddr offset, unsigned size) {
     MyPL011State *pl011 = (MyPL011State *)opaque;
-    uint64_t retval = read_funcs[offset](pl011);
+    uint64_t retval = (uint64_t)read_funcs[offset](pl011);
     trace_mypl011_read(offset, retval, pl011_regname(offset));
     return retval;
 }
@@ -826,8 +828,8 @@ static const MemoryRegionOps mypl011_mem_ops = {
     .read = mypl011_read,
     .write = mypl011_write,
     .endianness = DEVICE_NATIVE_ENDIAN,
-    .valid.max_access_size = 4,
-    .valid.min_access_size = 4
+    .impl.max_access_size = 4,
+    .impl.min_access_size = 4
 };
 
 
