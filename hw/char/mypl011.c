@@ -102,12 +102,11 @@ static void set_interrupt(MyPL011State *pl011, uint32_t irq_mask) {
     trace_mypl011_call(__func__);
     
     /* set RIS */
-    pl011->UARTRIS &= irq_mask;
-    /* check mask */
-    if (pl011->UARTIMSC & irq_mask) {
-        /* set MIS */
-        pl011->UARTMIS &= irq_mask;
-    }
+    pl011->UARTRIS |= irq_mask;
+    /* check MIS */
+    pl011->UARTMIS = pl011->UARTRIS & pl011->UARTIMSC;
+    trace_mypl011_irq_state(pl011->UARTRIS, pl011->UARTMIS, pl011->UARTIMSC);
+    
 }
 
 static void clear_interrupt(MyPL011State *pl011, uint32_t irq_mask) {
@@ -115,11 +114,10 @@ static void clear_interrupt(MyPL011State *pl011, uint32_t irq_mask) {
     
     /* clear RIS */
     pl011->UARTRIS &= ~irq_mask;
-    /* check mask */
-    if (pl011->UARTIMSC & irq_mask) {
-        /* clear MIS */
-        pl011->UARTMIS &= ~irq_mask;        
-    }
+    /* clear MIS */
+    pl011->UARTMIS = pl011->UARTRIS & pl011->UARTIMSC;
+    trace_mypl011_irq_state(pl011->UARTRIS, pl011->UARTMIS, pl011->UARTIMSC);
+    
 }
 
 static void trigger_interrupt(qemu_irq irq_line, int level) {
@@ -233,8 +231,8 @@ static void clear_MSINTR(MyPL011State *pl011, uint32_t irq_mask) {
 static void pl011_update_interrupts(MyPL011State *pl011) {
     trace_mypl011_call(__func__);
     
-    pl011->UARTMIS = pl011->UARTRIS & pl011->UARTIMSC;
     trace_mypl011_irq_state(pl011->UARTRIS, pl011->UARTMIS, pl011->UARTIMSC);
+    pl011->UARTMIS = pl011->UARTRIS & pl011->UARTIMSC;
     
     trigger_interrupt(pl011->UARTINTR,    pl011->UARTMIS != 0);
     trigger_interrupt(pl011->UARTRXINTR, (pl011->UARTMIS & RXINTR)!= 0);
@@ -333,10 +331,12 @@ static void mypl011_RX_FIFO_push(MyPL011State *pl011, uint32_t value) {
         trace_mypl011_put_fifo_full();
         pl011->UARTFR |= UARTFR_RXFF;
     }
-    
-    if (mypl011_RX_FIFO_reached_threshold(pl011)) {
-        set_RXINTR(pl011);
-    }
+
+    set_RXINTR(pl011);
+    pl011_update_interrupts(pl011);
+    /* if (mypl011_RX_FIFO_reached_threshold(pl011)) { */
+    /*     set_RXINTR(pl011); */
+    /* } */
 }
 
 /**
@@ -420,6 +420,8 @@ static void pl011_receive(void *opaque, const uint8_t *buf, int size) {
         return;
     }
 
+    for(int i = 0; i < size; i++)
+        trace_mypl011_receive(i, buf[i]);
     mypl011_RX_FIFO_push(opaque, *buf);
 }
 
