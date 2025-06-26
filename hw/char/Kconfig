@@ -11,6 +11,9 @@ config PARALLEL
 
 config PL011
     bool
+    
+config PL011S
+    bool
 
 config SERIAL
     bool
