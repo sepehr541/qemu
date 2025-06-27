@@ -16,6 +16,7 @@
 
 #include "hw/sysbus.h"
 #include "chardev/char-fe.h"
+#include "qemu/fifo32.h"
 #include "qom/object.h"
 
 #define TYPE_MYPL011 "MYPL011"
@@ -169,6 +170,7 @@ OBJECT_DECLARE_SIMPLE_TYPE(MyPL011State, MYPL011)
 #define UARTCellID3_OFFSET 0xFFC
 
 typedef uint32_t reg32;
+typedef uint16_t reg16;
 
 struct MyPL011State {
     /* QEMU emulation state */
@@ -193,32 +195,28 @@ struct MyPL011State {
 
     /* Device State */
     struct {
-        reg32 UARTRSR_ECR; /* Receive Status Register/Error Clear Register */
-        reg32 UARTFR;      /* Flag Register */
-        reg32 UARTILPR;    /* IrDA Low-Power Counter Register */
-        reg32 UARTIBRD;    /* Integer Baud Rate Register */
-        reg32 UARTFBRD;    /* FractionalBaud Rate Register */
-        reg32 UARTLCR_H;   /* Line Control Register */
-        reg32 UARTCR;      /* Control Register */
-        reg32 UARTIFLS;    /* Interrupt FIFO Level Select Register */
-        reg32 UARTIMSC;    /* Interrupt Mask Set/Clear Register */
-        reg32 UARTRIS;     /* Raw Interrupt Status Register */
-        reg32 UARTMIS;     /* Masked Interrupt Status Register */
-        reg32 UARTICR;     /* Interrupt Clear Register */
-        reg32 UARTDMACR;   /* DMA Control Register */
+        reg16 rsr_ecr;
+        reg16 overrun;
+        reg16 interrupts;
+        reg16 baudrate_int;
+        reg16 baudrate_frac;
+        reg16 isBaudrateSet;
+        reg16 lcr_h;
+        reg16 cr;
+        reg16 fifolevels;
+        reg16 interruptmasks;
+        reg16 txThresholdEverCrossed;
     };
 
     /*********************
       Data Register
     *********************/
-    /* RX FIFO */
-    struct {
-        reg32 read_fifo[MYPL011_FIFO_DEPTH];
-        int read_pos;
-        int read_count;
-        int read_trigger;
-    };
+    Fifo32 rxfifo;
+    Fifo32 txfifo;
+    
 };
+
+typedef struct MyPL011State PL011State;
 
 DeviceState *mypl011_create(hwaddr addr, qemu_irq irq, Chardev *chr);
 
