@@ -12,10 +12,12 @@
 #include "chardev/char-serial.h"
 #include "qemu/log.h"
 #include "qemu/module.h"
+#include "qemu/timer.h"
 #include "trace.h"
 #include <stdint.h>
 
 #define MyPL011_REG_SIZE 0x1000
+#define RX_TIMEOUT_MS 10
 
 /*********************
  * Constant State    *
@@ -89,20 +91,6 @@ static void pl011_trace_baudrate_change(const MyPL011State *pl011)
 /*********************
  *  Interrupts       *
  *********************/
-/* static void pl011_update_interrupts(MyPL011State *pl011) { */
-/*     trace_mypl011_call(__func__); */
-    
-/*     trace_mypl011_irq_state(pl011->UARTRIS, pl011->UARTMIS, pl011->UARTIMSC); */
-/*     pl011->UARTMIS = pl011->UARTRIS & pl011->UARTIMSC; */
-    
-/*     trigger_interrupt(pl011->UARTINTR,    pl011->UARTMIS != 0); */
-/*     trigger_interrupt(pl011->UARTRXINTR, (pl011->UARTMIS & RXINTR)!= 0); */
-/*     trigger_interrupt(pl011->UARTTXINTR, (pl011->UARTMIS & TXINTR) != 0); */
-/*     trigger_interrupt(pl011->UARTRTINTR, (pl011->UARTMIS & RTINTR) != 0); */
-/*     trigger_interrupt(pl011->UARTEINTR,  (pl011->UARTMIS & EINTR_MASK) != 0); */
-/*     trigger_interrupt(pl011->UARTMSINTR, (pl011->UARTMIS & MSINTR) != 0); */
-/* } */
-
 static void updateINTR(PL011State* s) {
     uint16_t intr = 0x0;
     uint16_t tmp = s->interrupts;
@@ -119,6 +107,13 @@ static void updateINTR(PL011State* s) {
         intr |= tmp;
     } else {
         qemu_set_irq(s->UARTTXINTR, 0x0);
+    }
+    
+    if ((tmp & 0x40) == 0x40) {
+        qemu_set_irq(s->UARTRTINTR, 0x1);
+        intr |= tmp;
+    } else {
+        qemu_set_irq(s->UARTRTINTR, 0x0);
     }
 
     if ((tmp & 0x780) != 0) {
@@ -138,7 +133,7 @@ static void updateINTR(PL011State* s) {
  * I/O Operations *
  ***************************/
 static uint32_t rx_threshold(void) {
-    return 1;
+    return 8;
 }
 
 static uint32_t tx_threshold(void) {
@@ -221,8 +216,18 @@ static void pl011_receive(void *opaque, const uint8_t *buf, int size) {
         return;
     }
 
-    for(int i = 0; i < size; i++)
+
+    MyPL011State *pl011 = MYPL011(opaque);
+    
+    timer_del(&pl011->rx_timeout);
+
+    for (int i = 0; i < size; i++) {
         receive(opaque, buf[i]);
+    }
+
+    int64_t next_expire = qemu_clock_get_ms(QEMU_CLOCK_VIRTUAL) + RX_TIMEOUT_MS;
+    timer_mod(&pl011->rx_timeout, next_expire);
+    updateINTR(opaque);
 }
 
 /**
@@ -326,6 +331,11 @@ static uint64_t readUARTDR(PL011State *s) {
         s->interrupts |= 0x10;
     } else {
         s->interrupts &= 0x7ef;
+    }
+
+    if (fifo32_is_empty(&s->rxfifo)) {
+        timer_del(&s->rx_timeout);
+        s->interrupts &= 0x7bf;
     }
 
     return tmp;
@@ -579,6 +589,14 @@ static const MemoryRegionOps mypl011_mem_ops = {
  * Lifecycle Callbacks  *
  ***************************/
 static void mypl011_reset(DeviceState *dev);
+static void mypl011_receive_timeout_handler(void *opaque) {
+    MyPL011State *pl011 = MYPL011(opaque);
+    trace_mypl011_rt_callback(fifo32_num_used(&pl011->rxfifo));
+    if (!fifo32_is_empty(&pl011->rxfifo)) {
+        pl011->interrupts |= 0x40;
+    }
+    updateINTR(pl011);
+}
 
 
 /**
@@ -594,6 +612,11 @@ static void mypl011_realize(DeviceState *dev, Error **errp) {
     fifo32_create(&pl011->rxfifo, MYPL011_FIFO_DEPTH);
     fifo32_create(&pl011->txfifo, MYPL011_FIFO_DEPTH);
     mypl011_reset(dev);
+
+    timer_init_ms(&pl011->rx_timeout,
+                  QEMU_CLOCK_VIRTUAL,
+                  mypl011_receive_timeout_handler,
+                  dev);
     
     qemu_chr_fe_set_handlers(
         &pl011->chr,
@@ -641,6 +664,9 @@ static void mypl011_reset(DeviceState *dev) {
     qemu_set_irq(pl011->UARTRTINTR, false);
     qemu_set_irq(pl011->UARTMSINTR, false);
     qemu_set_irq(pl011->UARTEINTR, false);
+
+    /* cancel rx_timeout timer */
+    timer_del(&pl011->rx_timeout);
 }
 
 static void pl011_clock_update(void *opaque, ClockEvent event) {

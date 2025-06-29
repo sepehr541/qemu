@@ -17,6 +17,7 @@
 #include "hw/sysbus.h"
 #include "chardev/char-fe.h"
 #include "qemu/fifo32.h"
+#include "qemu/timer.h"
 #include "qom/object.h"
 
 #define TYPE_MYPL011 "MYPL011"
@@ -181,6 +182,7 @@ struct MyPL011State {
         CharBackend chr;
         Clock *clk;
         bool migrate_clk;
+        struct QEMUTimer rx_timeout;
     };
 
     /* IRQ lines */

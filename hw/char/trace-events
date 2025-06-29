@@ -79,10 +79,12 @@ mypl011_read(uint32_t addr, uint32_t value, const char *regname) "addr 0x%03x va
 mypl011_read_fifo(int read_count) "FIFO read, read_count now %d"
 mypl011_write(uint32_t addr, uint32_t value, const char *regname) "addr 0x%03x value 0x%08x reg %s"
 mypl011_can_receive(uint32_t lcr, int read_count, int r) "LCR 0x%08x read_count %d returning %d"
-mypl011_receive(int i, uint8_t byte) "buf[%d] = %x"
+mypl011_receive_count(int i) "count = %d"
+mypl011_receive(int i, uint8_t byte, char c) "buf[%d] = %02x (%c)"
 mypl011_put_fifo(uint32_t c, int read_count) "new char 0x%x read_count now %d"
 mypl011_put_fifo_full(void) "FIFO now full, RXFF set"
 mypl011_baudrate_change(unsigned int baudrate, uint64_t clock, uint32_t ibrd, uint32_t fbrd) "new baudrate %u (clk: %" PRIu64 "hz, ibrd: %" PRIu32 ", fbrd: %" PRIu32 ")"
+mypl011_rt_callback(int i) "rxfifo size %d"
 
 # cmsdk-apb-uart.c
 cmsdk_apb_uart_read(uint64_t offset, uint64_t data, unsigned size) "CMSDK APB UART read: offset 0x%" PRIx64 " data 0x%" PRIx64 " size %u"
