@@ -64,8 +64,7 @@ static inline bool pl011_is_fifo_enabled(MyPL011State *pl011)
 }
 
 
-__attribute__((unused))
-static unsigned int pl011_get_baudrate(const MyPL011State *pl011)
+static uint64_t pl011_get_baudrate(const MyPL011State *pl011)
 {
     trace_mypl011_call(__func__);
     uint64_t clk;
@@ -78,7 +77,6 @@ static unsigned int pl011_get_baudrate(const MyPL011State *pl011)
     return (clk / ((pl011->baudrate_int << 6) + pl011->baudrate_frac)) << 2;
 }
 
-__attribute__((unused))
 static void pl011_trace_baudrate_change(const MyPL011State *pl011)
 {
     trace_mypl011_call(__func__);
@@ -536,12 +534,14 @@ static void writeUARTDR(PL011State *s, uint64_t value) {
 static void writeUARTFBRD(PL011State *s, uint64_t value) {
     assert(((((s->baudrate_int & 0x0) == 0x0 && s->cr != 0x5) && !((s->cr & 0x1) == 0x1)) && !((s->baudrate_int == 0xffff && value != 0x0))));
     s->baudrate_frac = value;
+    pl011_trace_baudrate_change(s);
 }
 
 
 static void writeUARTIBRD(PL011State *s, uint64_t value) {
     assert(((value != 0x0 && s->cr != 0x1) && !((s->cr & 0x1) == 0x1)));
     s->baudrate_int = value;
+    pl011_trace_baudrate_change(s);
 }
 
 
