@@ -132,26 +132,85 @@ static void updateINTR(PL011State* s) {
 /***************************
  * I/O Operations *
  ***************************/
-static uint32_t rx_threshold(void) {
-    return 8;
+enum fifo_enum {
+    RXFIFO,
+    TXFIFO
+};
+
+static bool fifo_full(PL011State *s, enum fifo_enum fifo) {
+    uint16_t max_length = 0x0;
+    if ((s->lcr_h & 0x10) == 0x10) {
+        max_length = MYPL011_FIFO_DEPTH;
+    } else {
+        max_length = 0x1;
+    }
+
+    uint16_t fifo_length = 0x0;
+    if (fifo == RXFIFO) {
+        fifo_length = fifo32_num_used(&s->rxfifo);
+    } else {
+        fifo_length = fifo32_num_used(&s->txfifo);
+    }
+
+    if (max_length == fifo_length) {
+        return 0x1;
+    } else {
+        return 0x0;
+    }
+
 }
 
-static uint32_t tx_threshold(void) {
-    return 1;
+static uint16_t fifo_threshold(PL011State *s, enum fifo_enum fifo) {
+    if (!((s->lcr_h & 0x10) == 0x10)) {
+        return 0x1;
+    }
+
+    uint16_t level = s->fifolevels;
+    if (fifo == RXFIFO) {
+        level &= 0x38;
+        level >>= 0x3;
+    } else {
+        level &= 0x7;
+    }
+
+    uint16_t numer = 0x0;
+    if (level == 0x0) {
+        numer = 0x1;
+    }
+
+    if (level == 0x1) {
+        numer = 0x2;
+    }
+
+    if (level == 0x2) {
+        numer = 0x4;
+    }
+
+    if (level == 0x3) {
+        numer = 0x6;
+    }
+
+    if (level == 0x4) {
+        numer = 0x7;
+    }
+
+    numer *= MYPL011_FIFO_DEPTH;
+    numer >>= 0x3;
+    return numer;
 }
 
 static void receive(PL011State* s, uint16_t value) {
-    assert((s->isBaudrateSet == 0x1 && (s->cr & 0x201) == 0x201));
-    if (fifo32_is_full(&s->rxfifo)) {
+    assert(((s->cr & 0x201) == 0x201 && s->isBaudrateSet == 0x1));
+    if (fifo_full(s, RXFIFO)) {
         s->overrun = 0x1;
         s->interrupts |= 0x400;
     } else {
-        s->overrun = 0x0;
         fifo32_push(&s->rxfifo, value);
+        s->overrun = 0x0;
         value &= 0x700;
         value >>= 0x1;
         s->interrupts |= value;
-        if (fifo32_num_used(&s->rxfifo) >= rx_threshold()) {
+        if (fifo32_num_used(&s->rxfifo) >= fifo_threshold(s, RXFIFO)) {
             s->interrupts |= 0x10;
         } else {
             s->interrupts &= 0x7ef;
@@ -163,13 +222,13 @@ static void receive(PL011State* s, uint16_t value) {
 
 
 static void transmit(PL011State* s) {
-    assert((!(fifo32_is_empty(&s->txfifo)) && ((s->cr & 0x201) == 0x201 && s->isBaudrateSet == 0x1)));
-    uint16_t tmp = 0x0;
-    tmp = fifo32_pop(&s->txfifo);
-    qemu_chr_fe_write_all(&s->chr, (uint8_t*)&tmp, 1);
-    if (fifo32_num_used(&s->txfifo) <= tx_threshold()) {
+    assert(((s->isBaudrateSet != 0x0 && !(fifo32_is_empty(&s->txfifo))) && (s->isBaudrateSet == 0x1 && (s->cr & 0x201) == 0x201)));
+    uint8_t tmp = 0x0;
+    tmp = (uint8_t)fifo32_pop(&s->txfifo);
+    qemu_chr_fe_write_all(&s->chr, &tmp, 1);
+    if (fifo32_num_used(&s->txfifo) <= fifo_threshold(s, TXFIFO)) {
         s->interrupts |= 0x20;
-        s->txThresholdEverCrossed = 0x1;
+        s->txThresholdEverCrossed = 0x20;
     } else {
         s->interrupts &= 0xffdf;
     }
@@ -327,10 +386,10 @@ static uint64_t readUARTDR(PL011State *s) {
     s->rsr_ecr = fifo32_pop(&s->rxfifo);
     uint16_t tmp = s->rsr_ecr;
     s->rsr_ecr >>= 0x8;
-    if (fifo32_num_used(&s->rxfifo) >= rx_threshold()) {
+    if (fifo32_num_used(&s->rxfifo) >= fifo_threshold(s, RXFIFO)) {
         s->interrupts |= 0x10;
     } else {
-        s->interrupts &= 0x7ef;
+        s->interrupts &= 0x17ef;
     }
 
     if (fifo32_is_empty(&s->rxfifo)) {
@@ -460,12 +519,12 @@ static void writeUARTCR(PL011State *s, uint64_t value) {
 
 
 static void writeUARTDR(PL011State *s, uint64_t value) {
-    assert(!(fifo32_is_full(&s->txfifo)));
+    assert(!(fifo_full(s, TXFIFO)));
     fifo32_push(&s->txfifo, value);
-    if (((s->interrupts & 0x0) == 0x0 && fifo32_num_used(&s->txfifo) <= tx_threshold())) {
+    if (((s->interrupts & 0x0) == 0x0 && fifo32_num_used(&s->txfifo) <= fifo_threshold(s, TXFIFO))) {
 
     } else {
-        s->interrupts &= 0x7df;
+        s->interrupts &= 0xffdf;
     }
 
     // always transmit immediately on writeUARTDR 
@@ -492,18 +551,19 @@ static void writeUARTICR(PL011State *s, uint64_t value) {
 }
 
 
+
 static void writeUARTIFLS(PL011State *s, uint64_t value) {
     s->fifolevels = value;
-    if (fifo32_num_used(&s->rxfifo) >= rx_threshold()) {
+    if (fifo32_num_used(&s->rxfifo) >= fifo_threshold(s, RXFIFO)) {
         s->interrupts |= 0x10;
     } else {
-        s->interrupts &= 0x7cf;
+        s->interrupts &= 0x6fcf;
     }
 
-    if ((s->txThresholdEverCrossed == 0x1 && fifo32_num_used(&s->txfifo) <= tx_threshold())) {
+    if ((s->txThresholdEverCrossed == 0x1 && fifo32_num_used(&s->txfifo) <= fifo_threshold(s, TXFIFO))) {
         s->interrupts |= 0x20;
     } else {
-        s->interrupts &= 0x8fdf;
+        s->interrupts &= 0x7df;
     }
 
 }
