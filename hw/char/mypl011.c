@@ -254,6 +254,13 @@ static int pl011_can_receive(void *opaque) {
     return free_slots;
 }
 
+static void set_rx_timer(PL011State *pl011) {
+    int64_t baudrate = pl011_get_baudrate(pl011);
+    int64_t delta = (32 * 1000000) / baudrate;
+    int64_t next_expire = qemu_clock_get_us(QEMU_CLOCK_VIRTUAL) + delta;
+    timer_mod(&pl011->rx_timeout, next_expire);
+}
+
 /**
  * @brief Summary
  * @details Description
@@ -282,8 +289,7 @@ static void pl011_receive(void *opaque, const uint8_t *buf, int size) {
         receive(opaque, buf[i]);
     }
 
-    int64_t next_expire = qemu_clock_get_ms(QEMU_CLOCK_VIRTUAL) + RX_TIMEOUT_MS;
-    timer_mod(&pl011->rx_timeout, next_expire);
+    set_rx_timer(pl011);
     updateINTR(opaque);
 }
 
@@ -673,7 +679,7 @@ static void mypl011_realize(DeviceState *dev, Error **errp) {
     fifo32_create(&pl011->txfifo, MYPL011_FIFO_DEPTH);
     mypl011_reset(dev);
 
-    timer_init_ms(&pl011->rx_timeout,
+    timer_init_us(&pl011->rx_timeout,
                   QEMU_CLOCK_VIRTUAL,
                   mypl011_receive_timeout_handler,
                   dev);
