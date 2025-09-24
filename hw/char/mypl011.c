@@ -765,6 +765,7 @@ static void mypl011_init(Object *obj) {
 
     /* Initialize clock into PL011  */
     pl011->clk = qdev_init_clock_in(DEVICE(obj), "clk", pl011_clock_update, pl011, ClockUpdate);
+    clock_set_hz(pl011->clk, 24000000);
     
 }
 
