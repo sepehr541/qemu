@@ -489,14 +489,12 @@ static void pl061_init(Object *obj)
 
 static void pl061_realize(DeviceState *dev, Error **errp)
 {
-    // reset to known state
-    pl061_enter_reset(dev);
+    // no op
 }
 
 static Property pl061_props[] = {
     DEFINE_PROP_UINT8("pullups", PL061State, pullups, 0xff),
-    DEFINE_PROP_UINT8("pulldowns", PL061State, pulldowns, 0x0),
-    DEFINE_PROP_END_OF_LIST()
+    DEFINE_PROP_UINT8("pulldowns", PL061State, pulldowns, 0x0)
 };
 
 static void pl061_class_init(ObjectClass *klass, const void *data)
