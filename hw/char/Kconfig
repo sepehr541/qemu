@@ -18,6 +18,9 @@ config PL011
 config PL011_C
     bool
 
+config MYPL011
+    bool
+
 config SERIAL
     bool
 
