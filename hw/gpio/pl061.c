@@ -72,8 +72,8 @@ struct PL061State {
         qemu_irq out[N_GPIOS];
     };
     struct {
-        uint8_t pullups;
-        uint8_t pulldowns;
+        uint32_t pullups;
+        uint32_t pulldowns;
     };
 };
 
@@ -485,16 +485,32 @@ static void pl061_init(Object *obj)
     sysbus_init_irq(sbd, &s->irq);
     qdev_init_gpio_in(dev, pl061_set_irq, N_GPIOS);
     qdev_init_gpio_out(dev, s->out, N_GPIOS);
+    qemu_irq pin0_in = qdev_get_gpio_in(dev, 0);
+    qdev_connect_gpio_out(dev, 1, pin0_in);
 }
 
 static void pl061_realize(DeviceState *dev, Error **errp)
 {
-    // no op
+    PL061State *s = PL061(dev);
+
+    if (s->pullups > 0xff) {
+        error_setg(errp, "pullups property must be between 0 and 0xff");
+        return;
+    }
+    if (s->pulldowns > 0xff) {
+        error_setg(errp, "pulldowns property must be between 0 and 0xff");
+        return;
+    }
+    if (s->pullups & s->pulldowns) {
+        error_setg(errp, "no bit may be set both in pullups and pulldowns");
+        return;
+    }
 }
 
-static Property pl061_props[] = {
-    DEFINE_PROP_UINT8("pullups", PL061State, pullups, 0xff),
-    DEFINE_PROP_UINT8("pulldowns", PL061State, pulldowns, 0x0)
+// const here matters, if removed, compiler error
+static const Property pl061_props[] = {
+    DEFINE_PROP_UINT32("pullups", PL061State, pullups, 0xff),
+    DEFINE_PROP_UINT32("pulldowns", PL061State, pulldowns, 0x0)
 };
 
 static void pl061_class_init(ObjectClass *klass, const void *data)
