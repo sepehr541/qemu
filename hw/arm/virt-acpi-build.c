@@ -1035,6 +1035,8 @@ build_dsdt(GArray *table_data, BIOSLinker *linker, VirtMachineState *vms)
     if (vms->second_ns_uart_present) {
         acpi_dsdt_add_uart(scope, &memmap[VIRT_UART1],
                            (irqmap[VIRT_UART1] + ARM_SPI_BASE), 1);
+         acpi_dsdt_add_uart(scope, &memmap[VIRT_UART2],
+                           (irqmap[VIRT_UART2] + ARM_SPI_BASE), 2);
     }
     if (vmc->acpi_expose_flash) {
         acpi_dsdt_add_flash(scope, &memmap[VIRT_FLASH]);
