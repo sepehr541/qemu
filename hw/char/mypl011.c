@@ -227,7 +227,7 @@ static void transmit(PL011State* s) {
     qemu_chr_fe_write_all(&s->chr, &tmp, 1);
     if (fifo32_num_used(&s->txfifo) == fifo_threshold(s, TXFIFO)) {
         s->interrupts |= 0x20;
-        s->txThresholdEverCrossed = 0x20;
+        s->txThresholdEverCrossed = 1;
     }
 
 }
