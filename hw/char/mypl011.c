@@ -198,37 +198,36 @@ static uint16_t fifo_threshold(PL011State *s, enum fifo_enum fifo) {
 }
 
 static void receive(PL011State* s, uint16_t value) {
-    assert(((s->cr & 0x201) == 0x201 && s->isBaudrateSet == 0x1));
+    
+    /* assert(((s->cr & 0x201) == 0x201 && s->isBaudrateSet == 0x1)); */
+    if (!((s->cr & 0x201) == 0x201 && s->isBaudrateSet == 0x1)) return;
+    
     if (fifo_full(s, RXFIFO)) {
         s->overrun = 0x1;
         s->interrupts |= 0x400;
     } else {
+        if (s->overrun == 0x1) value |= UARTDR_OE;
         fifo32_push(&s->rxfifo, value);
         s->overrun = 0x0;
         value &= 0x700;
         value >>= 0x1;
         s->interrupts |= value;
-        if (fifo32_num_used(&s->rxfifo) >= fifo_threshold(s, RXFIFO)) {
+        if (fifo32_num_used(&s->rxfifo) == fifo_threshold(s, RXFIFO)) {
             s->interrupts |= 0x10;
-        } else {
-            s->interrupts &= 0x7ef;
         }
-
     }
 
 }
 
 
 static void transmit(PL011State* s) {
-    assert(((s->isBaudrateSet != 0x0 && !(fifo32_is_empty(&s->txfifo))) && (s->isBaudrateSet == 0x1 && (s->cr & 0x201) == 0x201)));
+    assert(((s->isBaudrateSet != 0x0 && !(fifo32_is_empty(&s->txfifo))) && (s->isBaudrateSet == 0x1 && (s->cr & 0x101) == 0x101)));
     uint8_t tmp = 0x0;
     tmp = (uint8_t)fifo32_pop(&s->txfifo);
     qemu_chr_fe_write_all(&s->chr, &tmp, 1);
-    if (fifo32_num_used(&s->txfifo) <= fifo_threshold(s, TXFIFO)) {
+    if (fifo32_num_used(&s->txfifo) == fifo_threshold(s, TXFIFO)) {
         s->interrupts |= 0x20;
         s->txThresholdEverCrossed = 0x20;
-    } else {
-        s->interrupts &= 0xffdf;
     }
 
 }
@@ -243,15 +242,16 @@ static void transmit(PL011State* s) {
 static int pl011_can_receive(void *opaque) {
     trace_mypl011_call(__func__);
     
-    MyPL011State *pl011 = (MyPL011State *)opaque;
+    /* MyPL011State *pl011 = (MyPL011State *)opaque; */
 
-    int free_slots = fifo32_num_free(&pl011->rxfifo);
-    trace_mypl011_can_receive(pl011->lcr_h, free_slots, free_slots);
-    if ((pl011->cr & UARTCR_RXE) == 0 ||
-        (pl011->cr & UARTCR_UARTEN) == 0)
-        return 0;
-    
-    return free_slots;
+    /* int free_slots = fifo32_num_free(&pl011->rxfifo); */
+    /* trace_mypl011_can_receive(pl011->lcr_h, free_slots, free_slots); */
+    /* if ((pl011->cr & UARTCR_RXE) == 0 || */
+    /*     (pl011->cr & UARTCR_UARTEN) == 0) */
+    /*     return 0; */
+
+    /* to model error, I need to always receive */
+    return 1;
 }
 
 static void set_rx_timer(PL011State *pl011) {
@@ -301,11 +301,21 @@ static void pl011_receive(void *opaque, const uint8_t *buf, int size) {
  */
 static void pl011_event(void *opaque, QEMUChrEvent event) {
     trace_mypl011_call(__func__);
-    trace_mypl011_event(event);
-    MyPL011State *pl011 = (MyPL011State *)opaque;
-    /// TODO: handle serial break 
-    if (event == CHR_EVENT_BREAK && !pl011_loopback_enabled(pl011)) {
-        receive(pl011, UARTDR_BE);
+    
+    MyPL011State *s = (MyPL011State *)opaque;
+
+    if (event == CHR_EVENT_BREAK) {
+        trace_mypl011_event("BREAK");
+        receive(s, UARTDR_BE | UARTDR_FE);
+        s->interrupts |= (BEINTR | FEINTR);
+    } else if (event == CHR_EVENT_OPENED) {
+        trace_mypl011_event("OPENED");
+    } else if (event == CHR_EVENT_MUX_IN) {
+        trace_mypl011_event("MUX_IN");
+    } else if (event == CHR_EVENT_MUX_OUT) {
+        trace_mypl011_event("MUX_OUT");
+    } else {
+        trace_mypl011_event("CLOSED");
     }
 }
 
@@ -386,14 +396,12 @@ static uint64_t readUARTCellID3(PL011State *s) {
 }
 
 static uint64_t readUARTDR(PL011State *s) {
-    assert(!(fifo32_is_empty(&s->rxfifo)));
+    if (fifo32_is_empty(&s->rxfifo)) return 0;
     s->rsr_ecr = fifo32_pop(&s->rxfifo);
     uint16_t tmp = s->rsr_ecr;
     s->rsr_ecr >>= 0x8;
-    if (fifo32_num_used(&s->rxfifo) >= fifo_threshold(s, RXFIFO)) {
-        s->interrupts |= 0x10;
-    } else {
-        s->interrupts &= 0x17ef;
+    if (fifo32_num_used(&s->rxfifo) < fifo_threshold(s, RXFIFO)) {
+        s->interrupts &= 0xffef;
     }
 
     if (fifo32_is_empty(&s->rxfifo)) {
@@ -412,20 +420,21 @@ static uint64_t readUARTFBRD(PL011State *s) {
 
 static uint64_t readUARTFR(PL011State *s) {
     uint16_t value = 0x0;
-    if (fifo32_is_full(&s->rxfifo)) {
+    if (fifo_full(s, RXFIFO)) {
         value |= 0x40;
+    }
+    if (fifo32_is_empty(&s->rxfifo)) {
+        value |= 0x10;
+    }
+
+    if (fifo_full(s, TXFIFO)) {
+        value |= 0x20;
     }
 
     if (fifo32_is_empty(&s->txfifo)) {
         value |= 0x80;
-    }
-
-    if (fifo32_is_full(&s->txfifo)) {
-        value |= 0x20;
-    }
-
-    if (fifo32_is_empty(&s->rxfifo)) {
-        value |= 0x10;
+    } else {
+        value |= 0x8;
     }
 
     return value;
@@ -519,12 +528,19 @@ typedef void (*write_reg)(MyPL011State*, uint64_t value);
 
 static void writeUARTCR(PL011State *s, uint64_t value) {
     s->cr = value;
+    
+    if (((s->cr & 0x101) == 0x101) && (s->isBaudrateSet != 0)) {
+        while(!fifo32_is_empty(&s->txfifo)) {
+            transmit(s);
+        }
+    }
 }
 
 
 static void writeUARTDR(PL011State *s, uint64_t value) {
-    assert(!(fifo_full(s, TXFIFO)));
-    fifo32_push(&s->txfifo, value);
+    if (fifo_full(s, TXFIFO)) return;
+    
+    fifo32_push(&s->txfifo, (uint32_t)value);
     if (((s->interrupts & 0x0) == 0x0 && fifo32_num_used(&s->txfifo) <= fifo_threshold(s, TXFIFO))) {
 
     } else {
@@ -532,20 +548,21 @@ static void writeUARTDR(PL011State *s, uint64_t value) {
     }
 
     // always transmit immediately on writeUARTDR 
-    transmit(s);
-
+    if (((s->cr & 0x101) == 0x101) && (s->isBaudrateSet != 0)) {
+        transmit(s);
+    }
 }
 
 
 static void writeUARTFBRD(PL011State *s, uint64_t value) {
-    assert(((((s->baudrate_int & 0x0) == 0x0 && s->cr != 0x5) && !((s->cr & 0x1) == 0x1)) && !((s->baudrate_int == 0xffff && value != 0x0))));
+    /* assert(((((s->baudrate_int & 0x0) == 0x0 && s->cr != 0x5) && !((s->cr & 0x1) == 0x1)) && !((s->baudrate_int == 0xffff && value != 0x0)))); */
     s->baudrate_frac = value;
     pl011_trace_baudrate_change(s);
 }
 
 
 static void writeUARTIBRD(PL011State *s, uint64_t value) {
-    assert(((value != 0x0 && s->cr != 0x1) && !((s->cr & 0x1) == 0x1)));
+    /* assert(((value != 0x0 && s->cr != 0x1) && !((s->cr & 0x1) == 0x1))); */
     s->baudrate_int = value;
     pl011_trace_baudrate_change(s);
 }
@@ -553,7 +570,8 @@ static void writeUARTIBRD(PL011State *s, uint64_t value) {
 
 static void writeUARTICR(PL011State *s, uint64_t value) {
     value &= s->interrupts;
-    s->interrupts ^= value;
+    value ^= s->interrupts;
+    s->interrupts = (uint16_t)value;
 }
 
 
@@ -566,7 +584,7 @@ static void writeUARTIFLS(PL011State *s, uint64_t value) {
         s->interrupts &= 0x6fcf;
     }
 
-    if ((s->txThresholdEverCrossed == 0x1 && fifo32_num_used(&s->txfifo) <= fifo_threshold(s, TXFIFO))) {
+    if ((s->txThresholdEverCrossed == 0x1) && (fifo32_num_used(&s->txfifo) <= fifo_threshold(s, TXFIFO))) {
         s->interrupts |= 0x20;
     } else {
         s->interrupts &= 0x7df;
@@ -581,7 +599,8 @@ static void writeUARTIMSC(PL011State *s, uint64_t value) {
 
 
 static void writeUARTLCR_H(PL011State *s, uint64_t value) {
-    assert(!((s->cr & 0x1) == 0x1));
+    /* assert(!((s->cr & 0x1) == 0x1)); */
+    
     s->lcr_h = value;
     uint16_t a = value;
     a &= 0x10;
@@ -596,6 +615,12 @@ static void writeUARTLCR_H(PL011State *s, uint64_t value) {
         s->isBaudrateSet = 0x1;
     }
 
+    if ((s->lcr_h & 1) == 1) {
+        int break_enable = 1;
+        qemu_chr_fe_ioctl(&s->chr,
+                          CHR_IOCTL_SERIAL_SET_BREAK,
+                          &break_enable);
+    }
 }
 
 
@@ -614,7 +639,7 @@ write_reg write_funcs[] = {
     [UARTCR_OFFSET] = writeUARTCR,
     [UARTIFLS_OFFSET] = writeUARTIFLS,
     [UARTIMSC_OFFSET] = writeUARTIMSC,
-    [UARTICR_OFFSET] = writeUARTICR,
+    [UARTICR_OFFSET] = writeUARTICR
 };
 
 
@@ -887,10 +912,9 @@ static const VMStateDescription vmstate_mypl011 = {
  * @var mypl011_properties
  * @brief Properties of PL011 DeviceClass
  */
-static Property mypl011_properties[] = {
+static const Property mypl011_properties[] = {
     DEFINE_PROP_CHR("chardev", MyPL011State, chr),
-    DEFINE_PROP_BOOL("migrate-clk", MyPL011State, migrate_clk, true),
-    DEFINE_PROP_END_OF_LIST(),
+    DEFINE_PROP_BOOL("migrate-clk", MyPL011State, migrate_clk, true)
 };
 
 /**
@@ -899,12 +923,12 @@ static Property mypl011_properties[] = {
  * @param[in,out] klass ObjectClass
  * @param[out] class_data N/A
  */
-static void mypl011_class_init(ObjectClass *klass, void *class_data) {
+static void mypl011_class_init(ObjectClass *klass, const void *class_data) {
     trace_mypl011_call(__func__);
     
     DeviceClass *dc = DEVICE_CLASS(klass);
     dc->realize = mypl011_realize;
-    dc->reset = mypl011_reset;
+    device_class_set_legacy_reset(dc, mypl011_reset);
     dc->vmsd = &vmstate_mypl011;
     device_class_set_props(dc, mypl011_properties);
 }
