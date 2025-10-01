@@ -87,7 +87,8 @@
 #include "hw/uefi/var-service-api.h"
 #include "hw/virtio/virtio-md-pci.h"
 #include "hw/virtio/virtio-iommu.h"
-#include "hw/char/pl011.h"
+/* #include "hw/char/pl011.h" */
+#include "hw/char/mypl011.h"
 #include "hw/cxl/cxl.h"
 #include "hw/cxl/cxl_host.h"
 #include "qemu/guest-random.h"
@@ -191,6 +192,7 @@ static const MemMapEntry base_memmap[] = {
     [VIRT_PVTIME] =             { 0x090a0000, 0x00010000 },
     [VIRT_SECURE_GPIO] =        { 0x090b0000, 0x00001000 },
     [VIRT_ACPI_PCIHP] =         { 0x090c0000, ACPI_PCIHP_SIZE },
+    [VIRT_UART2] =              { 0x090d0000, 0x00001000 },
     [VIRT_MMIO] =               { 0x0a000000, 0x00000200 },
     /* ...repeating for a total of NUM_VIRTIO_TRANSPORTS, each of that size */
     [VIRT_PLATFORM_BUS] =       { 0x0c000000, 0x02000000 },
@@ -242,6 +244,7 @@ static const int a15irqmap[] = {
     [VIRT_GPIO] = 7,
     [VIRT_UART1] = 8,
     [VIRT_ACPI_GED] = 9,
+    [VIRT_UART2] = 10,
     [VIRT_MMIO] = 16, /* ...to 16 + NUM_VIRTIO_TRANSPORTS - 1 */
     [VIRT_GIC_V2M] = 48, /* ...to 48 + NUM_GICV2M_SPIS - 1 */
     [VIRT_SMMU] = 74,    /* ...to 74 + NUM_SMMU_IRQS - 1 */
@@ -970,7 +973,7 @@ static void create_uart(const VirtMachineState *vms, int uart,
     int irq = vms->irqmap[uart];
     const char compat[] = "arm,pl011\0arm,primecell";
     const char clocknames[] = "uartclk\0apb_pclk";
-    DeviceState *dev = qdev_new(TYPE_PL011);
+    DeviceState *dev = qdev_new(TYPE_MYPL011);
     SysBusDevice *s = SYS_BUS_DEVICE(dev);
     MachineState *ms = MACHINE(vms);
 
@@ -998,9 +1001,12 @@ static void create_uart(const VirtMachineState *vms, int uart,
     if (uart == VIRT_UART0) {
         qemu_fdt_setprop_string(ms->fdt, "/chosen", "stdout-path", nodename);
         qemu_fdt_setprop_string(ms->fdt, "/aliases", "serial0", nodename);
-    } else {
+    } else if (uart == VIRT_UART1) {
         qemu_fdt_setprop_string(ms->fdt, "/aliases", "serial1", nodename);
+    } else {
+        qemu_fdt_setprop_string(ms->fdt, "/aliases", "serial2", nodename);
     }
+    
     if (secure) {
         /* Mark as not usable by the normal world */
         qemu_fdt_setprop_string(ms->fdt, nodename, "status", "disabled");
@@ -2470,6 +2476,13 @@ static void machvirt_init(MachineState *machine)
      * that's what QEMU has always done.
      */
     if (!vms->secure) {
+        Chardev* serial2 = serial_hd(2);
+        
+        if (serial2 != NULL) {
+            vms->second_ns_uart_present = true;
+            create_uart(vms, VIRT_UART2, sysmem, serial2, false);
+        }
+        
         Chardev *serial1 = serial_hd(1);
 
         if (serial1) {
@@ -2478,10 +2491,12 @@ static void machvirt_init(MachineState *machine)
         }
     }
     create_uart(vms, VIRT_UART0, sysmem, serial_hd(0), false);
+    
     if (vms->secure) {
         create_uart(vms, VIRT_UART1, secure_sysmem, serial_hd(1), true);
     }
 
+    
     if (vms->secure) {
         create_secure_ram(vms, secure_sysmem, secure_tag_sysmem);
     }
